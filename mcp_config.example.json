@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "k8s-observability": {
+      "command": "python",
+      "args": ["-m", "src.server"],
+      "cwd": "/ruta/absoluta/a/mcp-k8s-observability",
+      "env": {
+        "MCP_MODE": "mock",
+        "PROMETHEUS_URL": "http://localhost:9090",
+        "LOKI_URL": "http://localhost:3100",
+        "KUBECONFIG": "~/.kube/config"
+      }
+    }
+  }
+}
