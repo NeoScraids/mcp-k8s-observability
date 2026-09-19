@@ -9,7 +9,7 @@ import asyncio
 from typing import Any, Dict, List
 
 from src.config import settings
-from src.tools.k8s_tools import get_pods, get_events
+from src.tools.k8s_tools import get_pods, get_events, list_namespaces
 from src.tools.prometheus_tools import query_prometheus
 from src.tools.loki_tools import query_loki_logs
 from src.models import DiagnosticReport
@@ -95,6 +95,14 @@ TOOLS_METADATA = [
             },
             "required": ["pod_name"]
         }
+    },
+    {
+        "name": "list_namespaces",
+        "description": "Lista todos los namespaces del cluster con su estado (Active/Terminating) y fecha de creacion. Recomendado como primer paso antes de consultar pods o eventos, para no adivinar nombres.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
     }
 ]
 
@@ -112,6 +120,9 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
         namespace = arguments.get("namespace", "default")
         events = get_events(namespace=namespace)
         return [ev.model_dump() for ev in events]
+
+    elif name == "list_namespaces":
+        return list_namespaces()
 
     elif name == "query_prometheus_metrics":
         query = arguments.get("query", "up")

@@ -2,7 +2,7 @@
 Herramientas de inspeccion y diagnostico de Kubernetes para el servidor MCP.
 """
 
-from typing import List
+from typing import Dict, List
 from datetime import datetime, timezone
 from src.config import settings
 from src.models import PodSummary, ClusterEvent
@@ -175,3 +175,42 @@ def get_events(namespace: str = "default") -> List[ClusterEvent]:
                 last_timestamp=datetime.now(timezone.utc).isoformat()
             )
         ]
+
+
+def list_namespaces() -> List[Dict[str, str]]:
+    """
+    Retorna los namespaces disponibles en el cluster con su estado y fecha de creacion.
+
+    Util como primer paso antes de consultar pods o eventos, para que el agente
+    sepa que namespaces existen sin tener que adivinar.
+    """
+    if settings.is_mock:
+        return [
+            {"name": "default",    "status": "Active", "created": "2025-04-01T00:00:00Z"},
+            {"name": "payments",   "status": "Active", "created": "2025-04-15T10:30:00Z"},
+            {"name": "monitoring", "status": "Active", "created": "2025-04-15T10:35:00Z"},
+            {"name": "kube-system","status": "Active", "created": "2025-04-01T00:00:00Z"},
+        ]
+
+    try:
+        from kubernetes import client, config
+        if settings.kubeconfig_path:
+            config.load_kube_config(config_file=settings.kubeconfig_path)
+        else:
+            try:
+                config.load_incluster_config()
+            except Exception:
+                config.load_kube_config()
+
+        v1 = client.CoreV1Api()
+        ns_list = v1.list_namespace()
+        return [
+            {
+                "name": ns.metadata.name,
+                "status": ns.status.phase or "Unknown",
+                "created": str(ns.metadata.creation_timestamp or ""),
+            }
+            for ns in ns_list.items
+        ]
+    except Exception as e:
+        return [{"name": "error", "status": f"APIError: {str(e)}", "created": ""}]
