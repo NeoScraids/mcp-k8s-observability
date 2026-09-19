@@ -214,3 +214,97 @@ def list_namespaces() -> List[Dict[str, str]]:
         ]
     except Exception as e:
         return [{"name": "error", "status": f"APIError: {str(e)}", "created": ""}]
+
+
+def get_pod_logs(
+    pod_name: str,
+    namespace: str = "default",
+    tail_lines: int = 50,
+    container: str = "",
+    previous: bool = False,
+) -> Dict[str, str]:
+    """
+    Obtiene las ultimas N lineas de log de un pod via la API de Kubernetes.
+
+    A diferencia de query_loki_logs (que depende de Loki), esta funcion lee
+    directamente del kubelet. Es el equivalente a:
+        kubectl logs <pod> --tail=<N> [--previous] [-c <container>]
+
+    Args:
+        pod_name: Nombre del pod.
+        namespace: Namespace del pod.
+        tail_lines: Cantidad de lineas desde el final (default 50).
+        container: Nombre del contenedor (si el pod tiene mas de uno).
+        previous: Si es True, retorna los logs de la instancia anterior (util
+                  para pods que ya reiniciaron y perdiste el output del crash).
+    """
+    if settings.is_mock:
+        if previous:
+            lines = [
+                "2026-09-19T09:14:02Z [main] Starting payments-processor v2.13.8",
+                "2026-09-19T09:14:03Z [main] Connecting to PostgreSQL at pgbouncer.database.svc:5432",
+                "2026-09-19T09:14:03Z [hikari] Pool initialized: max=20, min=5, idle_timeout=300s",
+                "2026-09-19T09:15:41Z [worker] Processing batch: 1,847 pending transactions",
+                "2026-09-19T09:15:42Z [worker] java.lang.OutOfMemoryError: Java heap space",
+                "2026-09-19T09:15:42Z [worker]   at com.payments.batch.TransactionAggregator.loadChunk(TransactionAggregator.java:89)",
+                "2026-09-19T09:15:42Z [main] Shutting down: OOM (exit code 137)",
+            ]
+        else:
+            lines = [
+                "2026-09-19T10:58:01Z [main] Starting payments-processor v2.13.8",
+                "2026-09-19T10:58:02Z [main] Connecting to PostgreSQL at pgbouncer.database.svc:5432",
+                "2026-09-19T10:58:02Z [hikari] Pool initialized: max=20, min=5, idle_timeout=300s",
+                "2026-09-19T10:58:05Z [health] Readiness probe: OK",
+                "2026-09-19T10:58:30Z [worker] Processed 312 transactions in 25.1s (avg 80.4ms/tx)",
+                "2026-09-19T11:00:01Z [health] Liveness probe: OK",
+                "2026-09-19T11:03:15Z [worker] Processed 287 transactions in 22.8s (avg 79.4ms/tx)",
+            ]
+
+        return {
+            "pod": pod_name,
+            "namespace": namespace,
+            "container": container or "(default)",
+            "previous": previous,
+            "tail_lines": tail_lines,
+            "log": "\n".join(lines[-tail_lines:]),
+        }
+
+    try:
+        from kubernetes import client, config
+        if settings.kubeconfig_path:
+            config.load_kube_config(config_file=settings.kubeconfig_path)
+        else:
+            try:
+                config.load_incluster_config()
+            except Exception:
+                config.load_kube_config()
+
+        v1 = client.CoreV1Api()
+        kwargs = {
+            "name": pod_name,
+            "namespace": namespace,
+            "tail_lines": tail_lines,
+            "previous": previous,
+        }
+        if container:
+            kwargs["container"] = container
+
+        log_output = v1.read_namespaced_pod_log(**kwargs)
+
+        return {
+            "pod": pod_name,
+            "namespace": namespace,
+            "container": container or "(default)",
+            "previous": previous,
+            "tail_lines": tail_lines,
+            "log": log_output,
+        }
+    except Exception as e:
+        return {
+            "pod": pod_name,
+            "namespace": namespace,
+            "container": container or "(default)",
+            "previous": previous,
+            "tail_lines": tail_lines,
+            "log": f"Error leyendo logs: {str(e)}",
+        }
