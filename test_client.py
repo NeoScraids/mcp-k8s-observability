@@ -32,12 +32,24 @@ def run_tests():
     }
     res = handle_json_rpc(tools_req)
     for tool in res["result"]["tools"]:
-        print(f"Herramienta: {tool['name']:<28} - {tool['description']}")
+        print(f"Herramienta: {tool['name']:<28} - {tool['description'][:80]}")
 
-    print_section("3. EJECUTAR HERRAMIENTA: get_kubernetes_pods")
-    pods_req = {
+    print_section("3. LIST NAMESPACES")
+    ns_req = {
         "jsonrpc": "2.0",
         "id": 3,
+        "method": "tools/call",
+        "params": {"name": "list_namespaces", "arguments": {}}
+    }
+    res = handle_json_rpc(ns_req)
+    namespaces = json.loads(res["result"]["content"][0]["text"])
+    for ns in namespaces:
+        print(f"  {ns['name']:<20} {ns['status']:<12} created: {ns['created']}")
+
+    print_section("4. GET KUBERNETES PODS")
+    pods_req = {
+        "jsonrpc": "2.0",
+        "id": 4,
         "method": "tools/call",
         "params": {
             "name": "get_kubernetes_pods",
@@ -50,10 +62,10 @@ def run_tests():
         status_flag = "[OK]" if p["ready"] else "[FAIL]"
         print(f"{status_flag:<7} Pod: {p['name']:<42} Estado: {p['status']:<18} Reinicios: {p['restarts']}")
 
-    print_section("4. EJECUTAR HERRAMIENTA: query_prometheus_metrics (CPU)")
+    print_section("5. PROMETHEUS INSTANT QUERY (CPU)")
     prom_req = {
         "jsonrpc": "2.0",
-        "id": 4,
+        "id": 5,
         "method": "tools/call",
         "params": {
             "name": "query_prometheus_metrics",
@@ -63,10 +75,63 @@ def run_tests():
     res = handle_json_rpc(prom_req)
     print(res["result"]["content"][0]["text"])
 
-    print_section("5. EJECUTAR HERRAMIENTA: diagnose_pod_health (analytics-exporter)")
+    print_section("6. PROMETHEUS RANGE QUERY (CPU tendencia 15min)")
+    range_req = {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {
+            "name": "query_prometheus_range",
+            "arguments": {
+                "query": "rate(container_cpu_usage_seconds_total[5m])",
+                "range_minutes": 15,
+                "step_seconds": 60
+            }
+        }
+    }
+    res = handle_json_rpc(range_req)
+    range_data = json.loads(res["result"]["content"][0]["text"])
+    print(f"  Tipo: {range_data['result_type']}, Series: {range_data['metrics_count']}")
+    if range_data["results"]:
+        values = range_data["results"][0].get("values", [])
+        print(f"  Datapoints: {len(values)} (primero: {values[0][1] if values else '-'}, ultimo: {values[-1][1] if values else '-'})")
+
+    print_section("7. GET POD LOGS (instancia actual)")
+    logs_req = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "get_pod_logs",
+            "arguments": {"pod_name": "payments-service-7f89d5b4-kx9p2", "tail_lines": 5}
+        }
+    }
+    res = handle_json_rpc(logs_req)
+    log_data = json.loads(res["result"]["content"][0]["text"])
+    print(f"  Pod: {log_data['pod']} | Previous: {log_data['previous']}")
+    for line in log_data["log"].split("\n"):
+        print(f"    {line}")
+
+    print_section("8. GET POD LOGS (instancia ANTERIOR - --previous)")
+    prev_req = {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {
+            "name": "get_pod_logs",
+            "arguments": {"pod_name": "payments-service-7f89d5b4-kx9p2", "previous": True, "tail_lines": 10}
+        }
+    }
+    res = handle_json_rpc(prev_req)
+    log_data = json.loads(res["result"]["content"][0]["text"])
+    print(f"  Pod: {log_data['pod']} | Previous: {log_data['previous']}")
+    for line in log_data["log"].split("\n"):
+        print(f"    {line}")
+
+    print_section("9. DIAGNOSTICO: analytics-exporter (OOMKilled)")
     diag_req = {
         "jsonrpc": "2.0",
-        "id": 5,
+        "id": 9,
         "method": "tools/call",
         "params": {
             "name": "diagnose_pod_health",
@@ -84,6 +149,9 @@ def run_tests():
         print(f"  {log}")
 
     print_section("PRUEBAS MCP COMPLETADAS EXITOSAMENTE")
+    tools_count = len(handle_json_rpc(tools_req)["result"]["tools"])
+    print(f"  Herramientas verificadas: {tools_count}")
+    print(f"  Modo: mock\n")
 
 
 if __name__ == "__main__":
