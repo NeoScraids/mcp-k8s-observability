@@ -1,17 +1,23 @@
-"""
-Herramientas de inspeccion y diagnostico de Kubernetes para el servidor MCP.
-"""
-
-from typing import Dict, List
+from typing import Any, Dict, List
 from datetime import datetime, timezone
 from src.config import settings
 from src.models import PodSummary, ClusterEvent
 
 
+def _get_v1_client():
+    from kubernetes import client, config
+    if settings.kubeconfig_path:
+        config.load_kube_config(config_file=settings.kubeconfig_path)
+    else:
+        try:
+            config.load_incluster_config()
+        except Exception:
+            config.load_kube_config()
+    return client.CoreV1Api()
+
+
 def get_pods(namespace: str = "default") -> List[PodSummary]:
-    """
-    Retorna la lista de pods y su estado en el namespace especificado.
-    """
+    """Retorna la lista de pods y su estado en el namespace especificado."""
     if settings.is_mock:
         return [
             PodSummary(
@@ -21,7 +27,7 @@ def get_pods(namespace: str = "default") -> List[PodSummary]:
                 ready=True,
                 restarts=0,
                 age_seconds=86400,
-                node_name="oke-pool1-node-01"
+                node_name="k8s-node-01"
             ),
             PodSummary(
                 name="auth-api-6b4c7d8e-mz3q1",
@@ -30,7 +36,7 @@ def get_pods(namespace: str = "default") -> List[PodSummary]:
                 ready=True,
                 restarts=2,
                 age_seconds=172800,
-                node_name="oke-pool1-node-02"
+                node_name="k8s-node-02"
             ),
             PodSummary(
                 name="notification-worker-5c9a1b2f-90rxt",
@@ -39,7 +45,7 @@ def get_pods(namespace: str = "default") -> List[PodSummary]:
                 ready=False,
                 restarts=14,
                 age_seconds=3600,
-                node_name="oke-pool1-node-03"
+                node_name="k8s-node-03"
             ),
             PodSummary(
                 name="analytics-exporter-4f11e9dc-pl45w",
@@ -48,21 +54,12 @@ def get_pods(namespace: str = "default") -> List[PodSummary]:
                 ready=False,
                 restarts=5,
                 age_seconds=7200,
-                node_name="oke-pool1-node-01"
+                node_name="k8s-node-01"
             ),
         ]
 
     try:
-        from kubernetes import client, config
-        if settings.kubeconfig_path:
-            config.load_kube_config(config_file=settings.kubeconfig_path)
-        else:
-            try:
-                config.load_incluster_config()
-            except Exception:
-                config.load_kube_config()
-
-        v1 = client.CoreV1Api()
+        v1 = _get_v1_client()
         pod_list = v1.list_namespaced_pod(namespace=namespace)
         results = []
         now = datetime.now(timezone.utc)
@@ -107,9 +104,7 @@ def get_pods(namespace: str = "default") -> List[PodSummary]:
 
 
 def get_events(namespace: str = "default") -> List[ClusterEvent]:
-    """
-    Retorna los eventos recientes de advertencia y error en el namespace.
-    """
+    """Retorna los eventos recientes de advertencia y error en el namespace."""
     if settings.is_mock:
         return [
             ClusterEvent(
@@ -131,7 +126,7 @@ def get_events(namespace: str = "default") -> List[ClusterEvent]:
             ClusterEvent(
                 type="Normal",
                 reason="Scheduled",
-                message="Successfully assigned default/payments-service-7f89d5b4-kx9p2 to oke-pool1-node-01",
+                message="Successfully assigned default/payments-service-7f89d5b4-kx9p2 to k8s-node-01",
                 involved_object="Pod/payments-service-7f89d5b4-kx9p2",
                 count=1,
                 last_timestamp="2026-09-10T19:00:00Z"
@@ -139,16 +134,7 @@ def get_events(namespace: str = "default") -> List[ClusterEvent]:
         ]
 
     try:
-        from kubernetes import client, config
-        if settings.kubeconfig_path:
-            config.load_kube_config(config_file=settings.kubeconfig_path)
-        else:
-            try:
-                config.load_incluster_config()
-            except Exception:
-                config.load_kube_config()
-
-        v1 = client.CoreV1Api()
+        v1 = _get_v1_client()
         events_list = v1.list_namespaced_event(namespace=namespace)
         results = []
 
@@ -178,31 +164,17 @@ def get_events(namespace: str = "default") -> List[ClusterEvent]:
 
 
 def list_namespaces() -> List[Dict[str, str]]:
-    """
-    Retorna los namespaces disponibles en el cluster con su estado y fecha de creacion.
-
-    Util como primer paso antes de consultar pods o eventos, para que el agente
-    sepa que namespaces existen sin tener que adivinar.
-    """
+    """Retorna los namespaces disponibles en el cluster."""
     if settings.is_mock:
         return [
-            {"name": "default",    "status": "Active", "created": "2025-04-01T00:00:00Z"},
-            {"name": "payments",   "status": "Active", "created": "2025-04-15T10:30:00Z"},
+            {"name": "default", "status": "Active", "created": "2025-04-01T00:00:00Z"},
+            {"name": "payments", "status": "Active", "created": "2025-04-15T10:30:00Z"},
             {"name": "monitoring", "status": "Active", "created": "2025-04-15T10:35:00Z"},
-            {"name": "kube-system","status": "Active", "created": "2025-04-01T00:00:00Z"},
+            {"name": "kube-system", "status": "Active", "created": "2025-04-01T00:00:00Z"},
         ]
 
     try:
-        from kubernetes import client, config
-        if settings.kubeconfig_path:
-            config.load_kube_config(config_file=settings.kubeconfig_path)
-        else:
-            try:
-                config.load_incluster_config()
-            except Exception:
-                config.load_kube_config()
-
-        v1 = client.CoreV1Api()
+        v1 = _get_v1_client()
         ns_list = v1.list_namespace()
         return [
             {
@@ -222,22 +194,8 @@ def get_pod_logs(
     tail_lines: int = 50,
     container: str = "",
     previous: bool = False,
-) -> Dict[str, str]:
-    """
-    Obtiene las ultimas N lineas de log de un pod via la API de Kubernetes.
-
-    A diferencia de query_loki_logs (que depende de Loki), esta funcion lee
-    directamente del kubelet. Es el equivalente a:
-        kubectl logs <pod> --tail=<N> [--previous] [-c <container>]
-
-    Args:
-        pod_name: Nombre del pod.
-        namespace: Namespace del pod.
-        tail_lines: Cantidad de lineas desde el final (default 50).
-        container: Nombre del contenedor (si el pod tiene mas de uno).
-        previous: Si es True, retorna los logs de la instancia anterior (util
-                  para pods que ya reiniciaron y perdiste el output del crash).
-    """
+) -> Dict[str, Any]:
+    """Obtiene las ultimas N lineas de log de un pod via API de Kubernetes."""
     if settings.is_mock:
         if previous:
             lines = [
@@ -270,16 +228,7 @@ def get_pod_logs(
         }
 
     try:
-        from kubernetes import client, config
-        if settings.kubeconfig_path:
-            config.load_kube_config(config_file=settings.kubeconfig_path)
-        else:
-            try:
-                config.load_incluster_config()
-            except Exception:
-                config.load_kube_config()
-
-        v1 = client.CoreV1Api()
+        v1 = _get_v1_client()
         kwargs = {
             "name": pod_name,
             "namespace": namespace,
@@ -308,3 +257,251 @@ def get_pod_logs(
             "tail_lines": tail_lines,
             "log": f"Error leyendo logs: {str(e)}",
         }
+
+
+def get_pod_detail(pod_name: str, namespace: str = "default") -> Dict[str, Any]:
+    """Obtiene informacion detallada de un pod (contenedores, exit codes, limits, condiciones)."""
+    if settings.is_mock:
+        if "notification-worker" in pod_name:
+            return {
+                "name": pod_name,
+                "namespace": namespace,
+                "phase": "Running",
+                "node_name": "k8s-node-03",
+                "pod_ip": "10.244.3.42",
+                "start_time": "2026-09-19T08:15:00Z",
+                "containers": [
+                    {
+                        "name": "notification-worker",
+                        "image": "registry.internal/notification-worker:v1.4.2",
+                        "ready": False,
+                        "restarts": 14,
+                        "state": "waiting",
+                        "waiting_reason": "CrashLoopBackOff",
+                        "last_state": {
+                            "exit_code": 1,
+                            "reason": "Error",
+                            "finished_at": "2026-09-19T11:02:10Z",
+                        },
+                        "requests": {"cpu": "50m", "memory": "128Mi"},
+                        "limits": {"cpu": "200m", "memory": "256Mi"},
+                    }
+                ],
+                "conditions": [
+                    {"type": "PodScheduled", "status": "True"},
+                    {"type": "Initialized", "status": "True"},
+                    {"type": "ContainersReady", "status": "False"},
+                    {"type": "Ready", "status": "False"},
+                ],
+            }
+        elif "analytics-exporter" in pod_name:
+            return {
+                "name": pod_name,
+                "namespace": namespace,
+                "phase": "Running",
+                "node_name": "k8s-node-01",
+                "pod_ip": "10.244.1.29",
+                "start_time": "2026-09-19T09:00:00Z",
+                "containers": [
+                    {
+                        "name": "analytics-exporter",
+                        "image": "registry.internal/analytics-exporter:v0.9.1",
+                        "ready": False,
+                        "restarts": 5,
+                        "state": "waiting",
+                        "waiting_reason": "CrashLoopBackOff",
+                        "last_state": {
+                            "exit_code": 137,
+                            "reason": "OOMKilled",
+                            "finished_at": "2026-09-19T10:45:00Z",
+                        },
+                        "requests": {"cpu": "100m", "memory": "256Mi"},
+                        "limits": {"cpu": "500m", "memory": "512Mi"},
+                    }
+                ],
+                "conditions": [
+                    {"type": "PodScheduled", "status": "True"},
+                    {"type": "Initialized", "status": "True"},
+                    {"type": "ContainersReady", "status": "False"},
+                    {"type": "Ready", "status": "False"},
+                ],
+            }
+        else:
+            return {
+                "name": pod_name,
+                "namespace": namespace,
+                "phase": "Running",
+                "node_name": "k8s-node-01",
+                "pod_ip": "10.244.1.18",
+                "start_time": "2026-09-18T10:00:00Z",
+                "containers": [
+                    {
+                        "name": "payments-service",
+                        "image": "registry.internal/payments:v2.13.8",
+                        "ready": True,
+                        "restarts": 0,
+                        "state": "running",
+                        "last_state": None,
+                        "requests": {"cpu": "100m", "memory": "256Mi"},
+                        "limits": {"cpu": "500m", "memory": "512Mi"},
+                    }
+                ],
+                "conditions": [
+                    {"type": "PodScheduled", "status": "True"},
+                    {"type": "Initialized", "status": "True"},
+                    {"type": "ContainersReady", "status": "True"},
+                    {"type": "Ready", "status": "True"},
+                ],
+            }
+
+    try:
+        v1 = _get_v1_client()
+        pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+
+        containers = []
+        statuses = {s.name: s for s in (pod.status.container_statuses or [])}
+        for c in pod.spec.containers:
+            st = statuses.get(c.name)
+            ready = st.ready if st else False
+            restarts = st.restart_count if st else 0
+            state = "unknown"
+            waiting_reason = None
+            last_state = None
+
+            if st and st.state:
+                if st.state.running:
+                    state = "running"
+                elif st.state.waiting:
+                    state = "waiting"
+                    waiting_reason = st.state.waiting.reason
+                elif st.state.terminated:
+                    state = "terminated"
+
+            if st and st.last_state and st.last_state.terminated:
+                term = st.last_state.terminated
+                last_state = {
+                    "exit_code": term.exit_code,
+                    "reason": term.reason,
+                    "finished_at": str(term.finished_at or ""),
+                }
+
+            reqs = c.resources.requests if c.resources else {}
+            limits = c.resources.limits if c.resources else {}
+
+            containers.append({
+                "name": c.name,
+                "image": c.image,
+                "ready": ready,
+                "restarts": restarts,
+                "state": state,
+                "waiting_reason": waiting_reason,
+                "last_state": last_state,
+                "requests": dict(reqs) if reqs else {},
+                "limits": dict(limits) if limits else {},
+            })
+
+        conditions = []
+        for cond in (pod.status.conditions or []):
+            conditions.append({
+                "type": cond.type,
+                "status": cond.status,
+                "reason": cond.reason or "",
+                "message": cond.message or "",
+            })
+
+        return {
+            "name": pod.metadata.name,
+            "namespace": namespace,
+            "phase": pod.status.phase or "Unknown",
+            "node_name": pod.spec.node_name,
+            "pod_ip": pod.status.pod_ip,
+            "start_time": str(pod.status.start_time or ""),
+            "containers": containers,
+            "conditions": conditions,
+        }
+    except Exception as e:
+        return {
+            "name": pod_name,
+            "namespace": namespace,
+            "phase": "Error",
+            "error": str(e),
+            "containers": [],
+            "conditions": [],
+        }
+
+
+def get_cluster_nodes() -> List[Dict[str, Any]]:
+    """Retorna la lista de nodos del cluster con estado, capacidad y condiciones."""
+    if settings.is_mock:
+        return [
+            {
+                "name": "k8s-node-01",
+                "status": "Ready",
+                "roles": ["worker"],
+                "version": "v1.29.4",
+                "internal_ip": "10.0.1.10",
+                "capacity": {"cpu": "8", "memory": "32Gi", "pods": "110"},
+                "allocatable": {"cpu": "7800m", "memory": "30Gi", "pods": "110"},
+                "conditions": {"Ready": "True", "MemoryPressure": "False", "DiskPressure": "False", "PIDPressure": "False"},
+            },
+            {
+                "name": "k8s-node-02",
+                "status": "Ready",
+                "roles": ["worker"],
+                "version": "v1.29.4",
+                "internal_ip": "10.0.1.11",
+                "capacity": {"cpu": "8", "memory": "32Gi", "pods": "110"},
+                "allocatable": {"cpu": "7800m", "memory": "30Gi", "pods": "110"},
+                "conditions": {"Ready": "True", "MemoryPressure": "False", "DiskPressure": "False", "PIDPressure": "False"},
+            },
+            {
+                "name": "k8s-node-03",
+                "status": "Ready",
+                "roles": ["worker"],
+                "version": "v1.29.4",
+                "internal_ip": "10.0.1.12",
+                "capacity": {"cpu": "8", "memory": "32Gi", "pods": "110"},
+                "allocatable": {"cpu": "7800m", "memory": "30Gi", "pods": "110"},
+                "conditions": {"Ready": "True", "MemoryPressure": "False", "DiskPressure": "False", "PIDPressure": "False"},
+            },
+        ]
+
+    try:
+        v1 = _get_v1_client()
+        nodes = v1.list_node()
+        results = []
+        for node in nodes.items:
+            conditions = {}
+            status = "Unknown"
+            for cond in (node.status.conditions or []):
+                conditions[cond.type] = cond.status
+                if cond.type == "Ready" and cond.status == "True":
+                    status = "Ready"
+                elif cond.type == "Ready" and cond.status != "True":
+                    status = "NotReady"
+
+            roles = []
+            for label in (node.metadata.labels or {}):
+                if label.startswith("node-role.kubernetes.io/"):
+                    roles.append(label.split("/")[1])
+            if not roles:
+                roles = ["worker"]
+
+            ip = ""
+            for addr in (node.status.addresses or []):
+                if addr.type == "InternalIP":
+                    ip = addr.address
+
+            results.append({
+                "name": node.metadata.name,
+                "status": status,
+                "roles": roles,
+                "version": node.status.node_info.kubelet_version if node.status.node_info else "",
+                "internal_ip": ip,
+                "capacity": dict(node.status.capacity) if node.status.capacity else {},
+                "allocatable": dict(node.status.allocatable) if node.status.allocatable else {},
+                "conditions": conditions,
+            })
+        return results
+    except Exception as e:
+        return [{"name": "error", "status": f"APIError: {str(e)}", "conditions": {}}]

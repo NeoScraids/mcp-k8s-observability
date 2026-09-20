@@ -39,7 +39,7 @@ def query_prometheus(query: str) -> PromQueryResult:
                 result_type="vector",
                 metrics_count=1,
                 results=[
-                    {"metric": {"job": "kubernetes-nodes", "instance": "oke-pool1-node-01"}, "value": [1726000000, "1"]}
+                    {"metric": {"job": "kubernetes-nodes", "instance": "k8s-node-01"}, "value": [1726000000, "1"]}
                 ]
             )
 
@@ -71,18 +71,7 @@ def query_prometheus(query: str) -> PromQueryResult:
 
 
 def query_prometheus_range(query: str, range_minutes: int = 15, step_seconds: int = 60) -> PromQueryResult:
-    """
-    Ejecuta una consulta PromQL sobre un rango de tiempo.
-
-    A diferencia de query_prometheus (instant query), esta devuelve una matrix
-    con datapoints por paso de tiempo. Util para ver tendencias de CPU/memoria
-    en los ultimos N minutos antes de un incidente.
-
-    Args:
-        query: Expresion PromQL valida.
-        range_minutes: Ventana de tiempo hacia atras desde ahora (default 15 min).
-        step_seconds: Resolucion entre puntos de datos (default 60s).
-    """
+    """Ejecuta una consulta PromQL sobre un rango de tiempo y retorna matrix de datapoints."""
     if settings.is_mock:
         import time as _time
         now = int(_time.time())
