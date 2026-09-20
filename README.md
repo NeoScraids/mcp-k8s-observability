@@ -6,21 +6,23 @@ La idea es simple: en vez de copiar y pegar outputs de `kubectl` y `curl` en el 
 
 ## Que hace
 
-El servidor expone 8 herramientas via JSON-RPC (transporte stdio):
+El servidor expone 10 herramientas via JSON-RPC (transporte stdio):
 
 **Kubernetes**
-- **`list_namespaces`** - Lista namespaces con estado y fecha de creacion (punto de entrada natural)
+- **`list_namespaces`** - Lista namespaces con estado y fecha de creacion
 - **`get_kubernetes_pods`** - Pods con su estado, reinicios y nodo asignado
+- **`get_pod_detail`** - Detalle profundo del pod: contenedores, imagenes, exit codes, limits/requests de CPU/memoria y condiciones
+- **`get_cluster_nodes`** - Nodos del cluster con su estado (Ready/NotReady), roles, capacidad y condiciones de presion
 - **`get_cluster_events`** - Eventos del cluster (BackOff, OOMKilled, FailedScheduling)
 - **`get_pod_logs`** - Ultimas N lineas de log via la API de K8s (`kubectl logs --tail`), con soporte `--previous`
 
 **Observabilidad**
 - **`query_prometheus_metrics`** - PromQL instant query
-- **`query_prometheus_range`** - PromQL range query con ventana y resolucion configurable (analisis de tendencias)
+- **`query_prometheus_range`** - PromQL range query con ventana y resolucion configurable
 - **`query_loki_logs`** - LogQL contra Grafana Loki
 
 **Diagnostico**
-- **`diagnose_pod_health`** - Herramienta compuesta: cruza estado del pod + metricas + eventos + logs y saca un health score (0-100) con acciones sugeridas. Detecta CrashLoopBackOff, OOMKilled, Pending, ImagePullBackOff y pods con alto ratio de reinicios
+- **`diagnose_pod_health`** - Correlacion automatica: estado del pod + exit codes + metricas + eventos + logs (actuales y de la instancia previa al crash) con health score (0-100) y acciones sugeridas
 
 ## Modo mock
 

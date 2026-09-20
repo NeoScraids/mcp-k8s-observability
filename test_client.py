@@ -148,6 +148,38 @@ def run_tests():
     for log in diag_data['recent_logs']:
         print(f"  {log}")
 
+    print_section("10. GET POD DETAIL (analisis profundo de contenedor y limits)")
+    detail_req = {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "get_pod_detail",
+            "arguments": {"pod_name": "analytics-exporter-4f11e9dc-pl45w", "namespace": "default"}
+        }
+    }
+    res = handle_json_rpc(detail_req)
+    detail_data = json.loads(res["result"]["content"][0]["text"])
+    print(f"  Pod: {detail_data['name']} | IP: {detail_data['pod_ip']} | Nodo: {detail_data['node_name']}")
+    for c in detail_data.get("containers", []):
+        print(f"    Contenedor: {c['name']} (ready={c['ready']}, restarts={c['restarts']})")
+        if c.get("last_state"):
+            print(f"      Last State: exit_code={c['last_state'].get('exit_code')} reason={c['last_state'].get('reason')}")
+        print(f"      Requests: {c.get('requests')} | Limits: {c.get('limits')}")
+
+    print_section("11. GET CLUSTER NODES (capacidad y condiciones)")
+    nodes_req = {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {"name": "get_cluster_nodes", "arguments": {}}
+    }
+    res = handle_json_rpc(nodes_req)
+    nodes_data = json.loads(res["result"]["content"][0]["text"])
+    for n in nodes_data:
+        cond_str = ", ".join([f"{k}={v}" for k, v in n["conditions"].items() if k == "Ready" or v == "True"])
+        print(f"  Nodo: {n['name']:<16} Estado: {n['status']:<10} IP: {n['internal_ip']:<14} Cond: {cond_str}")
+
     print_section("PRUEBAS MCP COMPLETADAS EXITOSAMENTE")
     tools_count = len(handle_json_rpc(tools_req)["result"]["tools"])
     print(f"  Herramientas verificadas: {tools_count}")

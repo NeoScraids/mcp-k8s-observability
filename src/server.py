@@ -9,7 +9,14 @@ import asyncio
 from typing import Any, Dict, List
 
 from src.config import settings
-from src.tools.k8s_tools import get_pods, get_events, list_namespaces, get_pod_logs
+from src.tools.k8s_tools import (
+    get_pods,
+    get_events,
+    list_namespaces,
+    get_pod_logs,
+    get_pod_detail,
+    get_cluster_nodes,
+)
 from src.tools.prometheus_tools import query_prometheus, query_prometheus_range
 from src.tools.loki_tools import query_loki_logs
 from src.models import DiagnosticReport
@@ -161,14 +168,39 @@ TOOLS_METADATA = [
             },
             "required": ["pod_name"]
         }
+    },
+    {
+        "name": "get_pod_detail",
+        "description": "Obtiene la configuracion y estado detallado de un pod: contenedores, imagenes, exit codes, limits/requests y condiciones.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pod_name": {
+                    "type": "string",
+                    "description": "Nombre exacto o prefijo del pod"
+                },
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace del pod",
+                    "default": "default"
+                }
+            },
+            "required": ["pod_name"]
+        }
+    },
+    {
+        "name": "get_cluster_nodes",
+        "description": "Lista los nodos del cluster con su estado (Ready/NotReady), roles, capacidad y condiciones de presion (memoria/disco).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
     }
 ]
 
 
 def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
-    """
-    Despachador central de herramientas del servidor MCP.
-    """
+    """Despachador central de herramientas del servidor MCP."""
     if name == "get_kubernetes_pods":
         namespace = arguments.get("namespace", "default")
         pods = get_pods(namespace=namespace)
@@ -181,6 +213,15 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
 
     elif name == "list_namespaces":
         return list_namespaces()
+
+    elif name == "get_cluster_nodes":
+        return get_cluster_nodes()
+
+    elif name == "get_pod_detail":
+        return get_pod_detail(
+            pod_name=arguments.get("pod_name", ""),
+            namespace=arguments.get("namespace", "default"),
+        )
 
     elif name == "query_prometheus_metrics":
         query = arguments.get("query", "up")
@@ -213,7 +254,6 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
         pod_name = arguments.get("pod_name", "")
         namespace = arguments.get("namespace", "default")
 
-        # Correlacion automatica
         pods = get_pods(namespace=namespace)
         target_pod = next((p for p in pods if pod_name in p.name), None)
 
@@ -239,6 +279,24 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
                 recent_events=[]
             ).model_dump()
 
+        # Inspeccionar detalles de contenedor y exit codes
+        pod_detail = get_pod_detail(pod_name=target_pod.name, namespace=namespace)
+        for c in pod_detail.get("containers", []):
+            last_st = c.get("last_state")
+            if last_st and last_st.get("exit_code") is not None:
+                issues.append(
+                    f"Contenedor '{c['name']}' termino previamente con exit code {last_st['exit_code']} (razon: {last_st.get('reason', 'desconocida')})."
+                )
+
+        # Si hubo reinicios o fallo, agregar logs de la instancia previa
+        if target_pod.restarts > 0 or target_pod.status in ["CrashLoopBackOff", "Failed", "OOMKilled"]:
+            prev = get_pod_logs(pod_name=target_pod.name, namespace=namespace, tail_lines=5, previous=True)
+            prev_content = prev.get("log", "")
+            if prev_content and not prev_content.startswith("Error"):
+                for line in prev_content.strip().split("\n")[-3:]:
+                    if line.strip():
+                        log_lines.append(f"[previous] {line.strip()}")
+
         if target_pod.status in ["CrashLoopBackOff", "Failed"]:
             issues.append(f"El pod esta en estado critico: {target_pod.status} con {target_pod.restarts} reinicios.")
             actions.append("Inspeccionar variables de entorno y conectividad a servicios dependientes.")
@@ -253,7 +311,7 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
 
         if target_pod.status == "Pending":
             issues.append("El pod esta en estado Pending: no se le ha asignado un nodo.")
-            actions.append("Verificar eventos del cluster para FailedScheduling o recursos insuficientes.")
+            actions.append("Verificar estado de los nodos con get_cluster_nodes y eventos con get_cluster_events.")
             score -= 40
 
         if target_pod.status == "ImagePullBackOff" or any("ImagePullBackOff" in ev for ev in related_events):
@@ -261,7 +319,6 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Any:
             actions.append("Verificar el tag de la imagen, el acceso al registry y los secrets de pull.")
             score -= 50
 
-        # Alto ratio de reinicios incluso si esta Running ahora
         if target_pod.status == "Running" and target_pod.restarts >= 5:
             issues.append(f"El pod esta corriendo pero acumula {target_pod.restarts} reinicios. Puede estar en un ciclo de crash/restart lento.")
             actions.append("Revisar logs de la instancia anterior con get_pod_logs(previous=true) para ver la causa del ultimo reinicio.")
